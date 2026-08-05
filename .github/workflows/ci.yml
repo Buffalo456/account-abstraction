@@ -10,7 +10,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -24,8 +24,40 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
+      - name: Dependency audit (report only)
+        run: yarn audit --level moderate 2>&1 | tee yarn-audit.txt
+        continue-on-error: true
+
       - name: Compile contracts
         run: yarn compile
 
-      - name: Run tests
-        run: yarn test
+      - name: Slither static analysis
+        uses: crytic/slither-action@v1
+        with:
+          args: --json slither-report.json
+        continue-on-error: true
+
+      - name: Run tests (capture output)
+        run: |
+          set -o pipefail
+          yarn test 2>&1 | tee test-output.txt
+
+      - name: Run coverage (if configured)
+        run: |
+          if yarn run | grep -q coverage; then
+            yarn coverage 2>&1 | tee coverage-output.txt || true
+          else
+            echo "No coverage script configured"
+          fi
+        continue-on-error: true
+
+      - name: Upload test output
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output
+          path: |
+            test-output.txt
+            yarn-audit.txt
+            slither-report.json
+            coverage-output.txt
+            coverage/**
